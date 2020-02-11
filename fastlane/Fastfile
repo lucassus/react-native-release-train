@@ -1,0 +1,118 @@
+package_json = JSON.parse(File.read('../package.json'))
+
+GOOGLE_PLAY_INTERNAL_TRACK = 'internal'.freeze
+GOOGLE_PLAY_TRACKS = ['production', 'beta', 'alpha', GOOGLE_PLAY_INTERNAL_TRACK].freeze
+
+# Read the current version and the build number
+VERSION_NAME = package_json['version'].freeze
+BUILD_NUMBER = package_json['versionCode'].to_i.freeze
+
+# Prevent Fastlane from overwriting README.md
+skip_docs
+
+platform :android do
+  lane :clean do
+    gradle(task: 'clean', project_dir: 'android')
+  end
+
+  private_lane :release_canary? do
+    latest_build_number = GOOGLE_PLAY_TRACKS.reduce([]) do |versions, track|
+      versions += google_play_track_version_codes(track: track)
+      versions
+    end.max
+
+    BUILD_NUMBER > latest_build_number
+  end
+
+  lane :build do
+    clean
+    gradle(
+      task: 'bundle',
+      build_type: 'Release',
+      project_dir: 'android'
+    )
+  end
+
+  desc 'Release canary to Google Play Internal Tack'
+  lane :release_canary do |options|
+    unless release_canary?
+      UI.important "The current build #{BUILD_NUMBER} has been already released. Skipping..."
+      next # Skip the release
+    end
+
+    build
+    supply(
+      track: GOOGLE_PLAY_INTERNAL_TRACK,
+      aab: lane_context[SharedValues::GRADLE_AAB_OUTPUT_PATH].to_s
+    )
+  end
+end
+
+platform :ios do
+  before_all do
+    # Sets up fastlane match on CircleCI for readonly code signing
+    setup_circle_ci if ENV.key? 'CIRCLECI'
+  end
+
+  desc 'Fetch certificates and provisioning profiles'
+  lane :certificates do
+    match(type: 'development', readonly: true)
+    match(type: 'appstore', readonly: true)
+  end
+
+  lane :clean do
+    clean_build_artifacts
+    xcclean(
+      workspace: 'ios/react-native-release-train.xcworkspace',
+      scheme: 'react-native-release-train'
+    )
+  end
+
+  private_lane :release_canary? do
+    latest_build_number = [latest_testflight_build_number, app_store_build_number].max
+
+    BUILD_NUMBER > latest_build_number
+  end
+
+  lane :build do
+    clean
+    cocoapods(podfile: 'ios/Podfile')
+    certificates
+    gym(
+      workspace: 'ios/react-native-release-train.xcworkspace',
+      scheme: 'react-native-release-train'
+    )
+  end
+
+  desc 'Release canary to App Store Testflight'
+  lane :release_canary do
+    unless release_canary?
+      UI.important "The current build #{BUILD_NUMBER} has been already released. Skipping..."
+      next # Skip the release
+    end
+
+    build
+    upload_to_testflight(
+      skip_waiting_for_build_processing: true,
+      notify_external_testers: true
+    )
+  end
+
+  lane :promote_canary do
+    unless BUILD_NUMBER > app_store_build_number
+      UI.important "The current build #{BUILD_NUMBER} has been already promoted. Skipping..."
+      next # Skip it
+    end
+
+    deliver(
+      build_number: BUILD_NUMBER.to_s,
+      app_version: VERSION_NAME,
+      submit_for_review: true,
+      automatic_release: true,
+      force: true, # Skip HTML report verification
+      skip_metadata: true,
+      skip_screenshots: true,
+      skip_binary_upload: true
+    )
+  end
+end

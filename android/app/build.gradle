@@ -1,0 +1,23 @@
+import groovy.json.JsonSlurper
+
+def readPackageJson() {
+  def inputFile = new File(file("$projectDir"), '../../package.json')
+  return new JsonSlurper().parseText(inputFile.text)
+}
+
+def packageJson = readPackageJson()
+
+// ...
+
+android {
+    // ...
+
+    defaultConfig {
+        versionCode Integer.parseInt(packageJson["versionCode"])
+        versionName packageJson["version"]
+    }
+
+    // ...
+}
+
+// ...
