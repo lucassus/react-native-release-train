@@ -1,7 +1,8 @@
 package_json = JSON.parse(File.read('../package.json'))
 
 GOOGLE_PLAY_INTERNAL_TRACK = 'internal'.freeze
-GOOGLE_PLAY_TRACKS = ['production', 'beta', 'alpha', GOOGLE_PLAY_INTERNAL_TRACK].freeze
+GOOGLE_PLAY_PRODUCTION_TRACK = 'production'.freeze
+GOOGLE_PLAY_TRACKS = [GOOGLE_PLAY_PRODUCTION_TRACK, 'beta', 'alpha', GOOGLE_PLAY_INTERNAL_TRACK].freeze
 
 # Read the current version and the build number
 VERSION_NAME = package_json['version'].freeze
@@ -34,7 +35,7 @@ platform :android do
   end
 
   desc 'Release canary to Google Play Internal Tack'
-  lane :release_canary do |options|
+  lane :release_canary do
     unless release_canary?
       UI.important "The current build #{BUILD_NUMBER} has been already released. Skipping..."
       next # Skip the release
@@ -44,6 +45,19 @@ platform :android do
     supply(
       track: GOOGLE_PLAY_INTERNAL_TRACK,
       aab: lane_context[SharedValues::GRADLE_AAB_OUTPUT_PATH].to_s
+    )
+  end
+
+  lane :promote_canary do
+    unless BUILD_NUMBER > google_play_track_version_codes(track: GOOGLE_PLAY_PRODUCTION_TRACK).max
+      UI.important "The current build #{BUILD_NUMBER} has been already promoted. Skipping..."
+      next # Skip it
+    end
+
+    supply(
+      version_code: BUILD_NUMBER,
+      track: GOOGLE_PLAY_INTERNAL_TRACK,
+      track_promote_to: GOOGLE_PLAY_PRODUCTION_TRACK
     )
   end
 end
